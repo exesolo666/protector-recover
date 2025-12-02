@@ -2,7 +2,7 @@
 <html lang="ru">
 <head>
   <meta charset="UTF-8" />
-  <title>Wheel Color Studio</title>
+  <title>Wheel Color Studio — подбор цвета дисков</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <link rel="stylesheet" href="styles.css" />
 </head>
@@ -10,7 +10,7 @@
   <div class="app">
     <header class="app-header">
       <h1>Wheel Color Studio</h1>
-      <p>Загрузите фото автомобиля и окрасьте диски в любой цвет</p>
+      <p>Профессиональный подбор цвета автомобильных дисков по фото</p>
     </header>
 
     <main class="layout">
@@ -18,7 +18,7 @@
       <section class="preview">
         <div class="canvas-wrapper">
           <div id="placeholder" class="placeholder">
-            <p>Загрузите фото автомобиля, чтобы начать</p>
+            <p>Загрузите фото автомобиля, затем нарисуйте маску по диску, чтобы перекрасить его.</p>
           </div>
           <canvas id="renderCanvas"></canvas>
           <canvas id="maskCanvas"></canvas>
@@ -36,67 +36,17 @@
           <div class="control-group">
             <label for="fileInput">1. Загрузите фото</label>
             <input type="file" id="fileInput" accept="image/*" />
-            <small>Лучше всего — фото сбоку, где хорошо виден диск.</small>
+            <small>Лучше всего — фото сбоку, где диск хорошо виден.</small>
           </div>
 
           <div class="control-group">
-            <label for="colorPicker">2. Выберите цвет диска</label>
-            <input type="color" id="colorPicker" value="#ff0000" />
-          </div>
-
-          <div class="control-group">
-            <label for="brushSize">
-              3. Размер кисти для выделения диска:
-              <span id="brushSizeValue">30 px</span>
-            </label>
-            <input
-              type="range"
-              id="brushSize"
-              min="5"
-              max="80"
-              value="30"
-            />
-          </div>
-
-          <div class="control-group">
-            <label for="intensity">
-              4. Интенсивность окраски:
-              <span id="intensityValue">80%</span>
-            </label>
-            <input
-              type="range"
-              id="intensity"
-              min="10"
-              max="100"
-              value="80"
-            />
-          </div>
-
-          <div class="buttons">
-            <button id="clearMask" type="button">Очистить маску</button>
-            <button id="resetAll" type="button" class="secondary">
-              Сбросить всё
-            </button>
-          </div>
-
-          <div class="hint">
-            <p><strong>Как работать:</strong></p>
-            <ol>
-              <li>Загрузите фото автомобиля.</li>
-              <li>Выберите нужный цвет диска.</li>
-              <li>Кистью обведите область диска (можно несколько раз).</li>
-              <li>Меняйте цвет и интенсивность — результат сразу обновится.</li>
-            </ol>
-          </div>
-        </div>
-      </section>
-    </main>
-
-    <footer class="app-footer">
-      <span>Демо-версия профессионального приложения для подбора цвета дисков.</span>
-    </footer>
-  </div>
-
-  <script src="app.js"></script>
-</body>
-</html>
+            <label>2. Профессиональные цвета дисков</label>
+            <div class="swatches" id="presetColors">
+              <button class="swatch active"
+                      type="button"
+                      data-color="#d7d7d7"
+                      data-name="Алюмохром"
+                      style="--swatch-color:#d7d7d7;">
+                Алюмохром
+              </button>
+              <button class="swatch"
