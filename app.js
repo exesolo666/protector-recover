@@ -1,10 +1,8 @@
 (() => {
   const fileInput = document.getElementById("fileInput");
-  const brushSizeInput = document.getElementById("brushSize");
   const intensityInput = document.getElementById("intensity");
-  const brushSizeValue = document.getElementById("brushSizeValue");
   const intensityValue = document.getElementById("intensityValue");
-  const clearMaskBtn = document.getElementById("clearMask");
+  const rerunAIBtn = document.getElementById("rerunAI");
   const resetBtn = document.getElementById("resetAll");
   const toggleOriginalBtn = document.getElementById("toggleOriginal");
   const downloadBtn = document.getElementById("downloadResult");
@@ -13,44 +11,33 @@
   const presetColorsContainer = document.getElementById("presetColors");
   const currentColorLabel = document.getElementById("currentColorLabel");
 
-  const renderCanvas = document.getElementById("renderCanvas");
-  const maskCanvas = document.getElementById("maskCanvas");
-  const renderCtx = renderCanvas.getContext("2d", { willReadFrequently: true });
-  const maskCtx = maskCanvas.getContext("2d", { willReadFrequently: true });
+  const previewCanvas = document.getElementById("previewCanvas");
+  const ctx = previewCanvas.getContext("2d", { willReadFrequently: true });
 
-  let originalImageData = null;
   let canvasWidth = 0;
   let canvasHeight = 0;
 
-  let isDrawing = false;
-  let lastX = 0;
-  let lastY = 0;
+  let originalImageData = null;   // исходное фото
+  let recoloredImageData = null;  // картинка с окрашенным диском
+  let wheelMask = null;           // маска диска (0 или 255 на пиксель)
 
-  // Текущий цвет (по умолчанию — алюмохром)
-  let currentColor = "#d7d7d7";
-
-  // Флаг режима "показать исходное"
+  let currentColor = "#d7d7d7";   // алюмохром
   let showingOriginal = false;
 
   function updateStatus(text) {
     statusText.textContent = text;
   }
 
-  function setBrushSizeLabel() {
-    brushSizeValue.textContent = `${brushSizeInput.value} px`;
-  }
-
   function setIntensityLabel() {
     intensityValue.textContent = `${intensityInput.value}%`;
   }
 
-  setBrushSizeLabel();
   setIntensityLabel();
   updateStatus(
-    "1) Загрузите фото. 2) Выберите цвет. 3) Нарисуйте маску по диску."
+    "1) Загрузите фото. 2) Подождите, пока ИИ найдёт диск. 3) Меняйте цвета."
   );
 
-  // ---------- ПРЕСЕТЫ ЦВЕТОВ ----------
+  // --------- ВЫБОР ЦВЕТА (ПРЕСЕТЫ) ---------
 
   if (presetColorsContainer) {
     presetColorsContainer.addEventListener("click", (event) => {
@@ -72,14 +59,12 @@
         currentColorLabel.textContent = `Текущий цвет: ${name}`;
       }
 
-      // При изменении цвета — показываем сразу результат
-      if (!showingOriginal) {
-        applyColor();
-      }
+      // Обновляем окраску, если уже есть маска
+      applyColor();
     });
   }
 
-  // ---------- ЗАГРУЗКА ИЗОБРАЖЕНИЯ ----------
+  // --------- ЗАГРУЗКА ИЗОБРАЖЕНИЯ ---------
 
   fileInput.addEventListener("change", (event) => {
     const file = event.target.files[0];
@@ -94,105 +79,196 @@
         if (toggleOriginalBtn) {
           toggleOriginalBtn.textContent = "Показать исходное";
         }
-        fitImageToCanvas(img);
-        updateStatus(
-          "Нарисуйте маску по области диска. Цвет можно менять в один клик."
-        );
+        fitImageToSquare(img);
+        updateStatus("Изображение загружено. ИИ ищет диск...");
+        // Сразу запускаем ИИ
+        runAIWheelDetection();
       };
       img.src = e.target.result;
     };
     reader.readAsDataURL(file);
   });
 
-  function fitImageToCanvas(img) {
+  // Приводим к формату 1:1 с центрированием (crop)
+  function fitImageToSquare(img) {
     const wrapper = document.querySelector(".canvas-wrapper");
-    let maxWidth = wrapper ? wrapper.clientWidth : img.width;
-
-    const scale = img.width > maxWidth ? maxWidth / img.width : 1;
-
-    canvasWidth = Math.round(img.width * scale);
-    canvasHeight = Math.round(img.height * scale);
-
-    renderCanvas.width = canvasWidth;
-    renderCanvas.height = canvasHeight;
-    maskCanvas.width = canvasWidth;
-    maskCanvas.height = canvasHeight;
-
-    renderCtx.clearRect(0, 0, canvasWidth, canvasHeight);
-    renderCtx.drawImage(img, 0, 0, canvasWidth, canvasHeight);
-
-    originalImageData = renderCtx.getImageData(0, 0, canvasWidth, canvasHeight);
-    maskCtx.clearRect(0, 0, canvasWidth, canvasHeight);
-  }
-
-  // ---------- РИСОВАНИЕ МАСКИ ----------
-
-  function getCanvasCoords(event, canvas) {
-    const rect = canvas.getBoundingClientRect();
-    const scaleX = canvas.width / rect.width;
-    const scaleY = canvas.height / rect.height;
-
-    return {
-      x: (event.clientX - rect.left) * scaleX,
-      y: (event.clientY - rect.top) * scaleY,
-    };
-  }
-
-  function startDrawing(event) {
-    if (!originalImageData) {
-      updateStatus("Сначала загрузите фото, затем рисуйте маску по диску.");
-      return;
+    let size = wrapper ? Math.floor(wrapper.clientWidth) : 600;
+    if (!size || size <= 0) {
+      size = 600;
     }
 
-    isDrawing = true;
-    maskCtx.lineCap = "round";
-    maskCtx.lineJoin = "round";
-    maskCtx.strokeStyle = "rgba(255, 255, 255, 1)";
-    maskCtx.lineWidth = Number(brushSizeInput.value);
+    previewCanvas.width = size;
+    previewCanvas.height = size;
+    canvasWidth = size;
+    canvasHeight = size;
 
-    const { x, y } = getCanvasCoords(event, maskCanvas);
-    lastX = x;
-    lastY = y;
+    const minSide = Math.min(img.width, img.height);
+    const sx = (img.width - minSide) / 2;
+    const sy = (img.height - minSide) / 2;
 
-    maskCtx.beginPath();
-    maskCtx.moveTo(lastX, lastY);
+    ctx.clearRect(0, 0, size, size);
+    ctx.drawImage(img, sx, sy, minSide, minSide, 0, 0, size, size);
 
-    event.preventDefault();
+    originalImageData = ctx.getImageData(0, 0, size, size);
+    recoloredImageData = null;
+    wheelMask = null;
   }
 
-  function draw(event) {
-    if (!isDrawing) return;
+  // --------- МАШИННОЕ ОБУЧЕНИЕ: ПОИСК ДИСКА ---------
 
-    const { x, y } = getCanvasCoords(event, maskCanvas);
-    maskCtx.lineTo(x, y);
-    maskCtx.stroke();
+  function createWheelMaskAI(imageData, width, height) {
+    const data = imageData.data;
+    const totalPixels = width * height;
 
-    lastX = x;
-    lastY = y;
+    const gray = new Float32Array(totalPixels);
+    const radius = new Float32Array(totalPixels);
 
-    // Во время рисования показываем раскрашенный вариант
-    if (!showingOriginal) {
-      applyColor();
+    const cx = width / 2;
+    const cy = height / 2;
+
+    // Подготовим признаки: яркость + расстояние от центра
+    let index = 0;
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < width; x++) {
+        const i4 = index * 4;
+        const r = data[i4];
+        const g = data[i4 + 1];
+        const b = data[i4 + 2];
+
+        // Перцептивная яркость (0..1)
+        const gy = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+        gray[index] = gy;
+
+        const dx = (x - cx) / width;
+        const dy = (y - cy) / height;
+        const rad = Math.sqrt(dx * dx + dy * dy);
+        radius[index] = rad;
+
+        index++;
+      }
     }
 
-    event.preventDefault();
-  }
+    // k-means по [яркость, радиус]
+    const K = 3;
+    const centGray = new Float32Array(K);
+    const centRad = new Float32Array(K);
 
-  function stopDrawing(event) {
-    if (!isDrawing) return;
-    isDrawing = false;
-    if (!showingOriginal) {
-      applyColor();
+    let minG = 1;
+    let maxG = 0;
+    for (let i = 0; i < totalPixels; i++) {
+      const gVal = gray[i];
+      if (gVal < minG) minG = gVal;
+      if (gVal > maxG) maxG = gVal;
     }
-    event.preventDefault();
+
+    centGray[0] = minG;
+    centGray[1] = (minG + maxG) / 2;
+    centGray[2] = maxG;
+
+    centRad[0] = 0.3;
+    centRad[1] = 0.5;
+    centRad[2] = 0.7;
+
+    const labels = new Uint8Array(totalPixels);
+    const sumG = new Float32Array(K);
+    const sumR = new Float32Array(K);
+    const count = new Uint32Array(K);
+
+    const iterations = 4;
+
+    for (let it = 0; it < iterations; it++) {
+      // E-шаг: присваиваем пиксели кластерам
+      for (let i = 0; i < totalPixels; i++) {
+        let bestK = 0;
+        let bestDist = Infinity;
+
+        const gVal = gray[i];
+        const rVal = radius[i];
+
+        for (let k = 0; k < K; k++) {
+          const dg = gVal - centGray[k];
+          const dr = rVal - centRad[k];
+          const dist = dg * dg + dr * dr;
+          if (dist < bestDist) {
+            bestDist = dist;
+            bestK = k;
+          }
+        }
+        labels[i] = bestK;
+      }
+
+      // M-шаг: пересчитываем центроиды
+      sumG.fill(0);
+      sumR.fill(0);
+      count.fill(0);
+
+      for (let i = 0; i < totalPixels; i++) {
+        const k = labels[i];
+        sumG[k] += gray[i];
+        sumR[k] += radius[i];
+        count[k]++;
+      }
+
+      for (let k = 0; k < K; k++) {
+        if (count[k] > 0) {
+          centGray[k] = sumG[k] / count[k];
+          centRad[k] = sumR[k] / count[k];
+        }
+      }
+    }
+
+    // Выбираем кластер, который больше всего похож на диск:
+    // средний радиус (не совсем центр и не совсем края),
+    // средняя яркость (не самый тёмный, не самый светлый),
+    // достаточное количество пикселей.
+    let chosenCluster = 0;
+    let bestScore = -Infinity;
+
+    for (let k = 0; k < K; k++) {
+      const gMean = centGray[k];
+      const rMean = centRad[k];
+      const cnt = count[k] || 1;
+
+      const grayTarget = 0.6; // диск часто средне-серый
+      const radTarget = 0.5;  // плюс-минус середина радиуса
+
+      let score = 0;
+      score -= Math.abs(gMean - grayTarget) * 2.0;
+      score -= Math.abs(rMean - radTarget) * 3.0;
+      score += (cnt / totalPixels) * 1.5;
+
+      if (score > bestScore) {
+        bestScore = score;
+        chosenCluster = k;
+      }
+    }
+
+    const mask = new Uint8ClampedArray(totalPixels);
+    for (let i = 0; i < totalPixels; i++) {
+      mask[i] = labels[i] === chosenCluster ? 255 : 0;
+    }
+
+    return mask;
   }
 
-  maskCanvas.addEventListener("pointerdown", startDrawing);
-  maskCanvas.addEventListener("pointermove", draw);
-  window.addEventListener("pointerup", stopDrawing);
-  window.addEventListener("pointercancel", stopDrawing);
+  function runAIWheelDetection() {
+    if (!originalImageData || !canvasWidth || !canvasHeight) return;
 
-  // ---------- ЦВЕТ/ИНТЕНСИВНОСТЬ ----------
+    updateStatus("ИИ анализирует изображение и ищет диск...");
+
+    // Небольшая задержка, чтобы статус успел обновиться
+    setTimeout(() => {
+      wheelMask = createWheelMaskAI(originalImageData, canvasWidth, canvasHeight);
+      if (wheelMask) {
+        updateStatus("Область диска найдена автоматически. Меняйте цвета и интенсивность.");
+        applyColor();
+      } else {
+        updateStatus("Не удалось найти диск. Попробуйте другое фото или пересчитать ИИ.");
+      }
+    }, 10);
+  }
+
+  // --------- НАЛОЖЕНИЕ ЦВЕТА ПО МАСКЕ ---------
 
   function hexToRgb(hex) {
     let value = hex.replace("#", "");
@@ -210,82 +286,67 @@
     };
   }
 
-  // Главная логика раскраски
   function applyColor() {
-    if (!originalImageData || !canvasWidth || !canvasHeight) return;
-    if (showingOriginal) {
-      // Если пользователь смотрит "до", не трогаем картинку
-      return;
-    }
+    if (!originalImageData || !wheelMask) return;
 
     const { r, g, b } = hexToRgb(currentColor || "#d7d7d7");
     const intensity = Number(intensityInput.value) / 100;
 
     const src = originalImageData.data;
-    const maskImg = maskCtx.getImageData(0, 0, canvasWidth, canvasHeight);
-    const maskData = maskImg.data;
+    const totalPixels = canvasWidth * canvasHeight;
+    const dst = new Uint8ClampedArray(src.length);
 
-    const output = renderCtx.createImageData(canvasWidth, canvasHeight);
-    const dst = output.data;
+    for (let i = 0; i < totalPixels; i++) {
+      const maskVal = wheelMask[i] / 255; // 0..1
+      const alpha = maskVal * intensity;
 
-    for (let i = 0; i < src.length; i += 4) {
-      const maskAlpha = maskData[i + 3]; // 0–255
+      const idx = i * 4;
+      const or = src[idx];
+      const og = src[idx + 1];
+      const ob = src[idx + 2];
+      const oa = src[idx + 3];
 
-      if (maskAlpha > 0) {
-        const alpha = intensity * (maskAlpha / 255);
-
-        const or = src[i];
-        const og = src[i + 1];
-        const ob = src[i + 2];
-        const oa = src[i + 3];
-
-        dst[i]     = or * (1 - alpha) + r * alpha;
-        dst[i + 1] = og * (1 - alpha) + g * alpha;
-        dst[i + 2] = ob * (1 - alpha) + b * alpha;
-        dst[i + 3] = oa;
+      if (alpha > 0) {
+        dst[idx]     = or * (1 - alpha) + r * alpha;
+        dst[idx + 1] = og * (1 - alpha) + g * alpha;
+        dst[idx + 2] = ob * (1 - alpha) + b * alpha;
+        dst[idx + 3] = oa;
       } else {
-        dst[i]     = src[i];
-        dst[i + 1] = src[i + 1];
-        dst[i + 2] = src[i + 2];
-        dst[i + 3] = src[i + 3];
+        dst[idx]     = or;
+        dst[idx + 1] = og;
+        dst[idx + 2] = ob;
+        dst[idx + 3] = oa;
       }
     }
 
-    renderCtx.putImageData(output, 0, 0);
-  }
+    recoloredImageData = new ImageData(dst, canvasWidth, canvasHeight);
 
-  brushSizeInput.addEventListener("input", () => {
-    setBrushSizeLabel();
-  });
+    if (!showingOriginal) {
+      ctx.putImageData(recoloredImageData, 0, 0);
+    }
+  }
 
   intensityInput.addEventListener("input", () => {
     setIntensityLabel();
-    if (!showingOriginal) {
-      applyColor();
-    }
+    applyColor();
   });
 
-  // ---------- КНОПКИ УПРАВЛЕНИЯ ----------
+  // --------- КНОПКИ УПРАВЛЕНИЯ ---------
 
-  clearMaskBtn.addEventListener("click", () => {
-    if (!originalImageData) return;
-    maskCtx.clearRect(0, 0, canvasWidth, canvasHeight);
-    if (showingOriginal) {
-      renderCtx.putImageData(originalImageData, 0, 0);
-    } else {
-      renderCtx.putImageData(originalImageData, 0, 0);
-      applyColor();
-    }
-    updateStatus("Маска очищена. Нарисуйте заново по диску.");
-  });
+  if (rerunAIBtn) {
+    rerunAIBtn.addEventListener("click", () => {
+      if (!originalImageData) return;
+      runAIWheelDetection();
+    });
+  }
 
   resetBtn.addEventListener("click", () => {
     fileInput.value = "";
     originalImageData = null;
+    recoloredImageData = null;
+    wheelMask = null;
 
-    renderCtx.clearRect(0, 0, renderCanvas.width, renderCanvas.height);
-    maskCtx.clearRect(0, 0, maskCanvas.width, maskCanvas.height);
-
+    ctx.clearRect(0, 0, previewCanvas.width, previewCanvas.height);
     placeholder.classList.remove("hidden");
     showingOriginal = false;
     if (toggleOriginalBtn) {
@@ -294,7 +355,6 @@
     updateStatus("Загрузите фото, чтобы начать.");
   });
 
-  // До / После
   if (toggleOriginalBtn) {
     toggleOriginalBtn.addEventListener("click", () => {
       if (!originalImageData) return;
@@ -302,30 +362,22 @@
       showingOriginal = !showingOriginal;
 
       if (showingOriginal) {
-        renderCtx.putImageData(originalImageData, 0, 0);
+        ctx.putImageData(originalImageData, 0, 0);
         toggleOriginalBtn.textContent = "Показать с окраской";
         updateStatus("Режим: исходное фото (до).");
       } else {
-        applyColor();
+        if (!recoloredImageData && wheelMask) {
+          applyColor();
+        }
+        if (recoloredImageData) {
+          ctx.putImageData(recoloredImageData, 0, 0);
+        }
         toggleOriginalBtn.textContent = "Показать исходное";
         updateStatus("Режим: с окраской (после).");
       }
     });
   }
 
-  // Скачать результат
   if (downloadBtn) {
     downloadBtn.addEventListener("click", () => {
       if (!originalImageData) return;
-
-      const link = document.createElement("a");
-      link.href = renderCanvas.toDataURL("image/png");
-      link.download = "wheel-color.png";
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-
-      updateStatus("Результат сохранён как PNG-файл.");
-    });
-  }
-})();
