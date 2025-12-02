@@ -1,4 +1,4 @@
-(() => {
+window.addEventListener("DOMContentLoaded", () => {
   const fileInput = document.getElementById("fileInput");
   const intensityInput = document.getElementById("intensity");
   const intensityValue = document.getElementById("intensityValue");
@@ -12,33 +12,63 @@
   const currentColorLabel = document.getElementById("currentColorLabel");
 
   const previewCanvas = document.getElementById("previewCanvas");
-  const ctx = previewCanvas.getContext("2d", { willReadFrequently: true });
+  const ctx = previewCanvas
+    ? previewCanvas.getContext("2d", { willReadFrequently: true })
+    : null;
 
-  let canvasWidth = 0;
-  let canvasHeight = 0;
+  if (!previewCanvas || !ctx) {
+    console.error("Canvas not found or context not available");
+    if (statusText) {
+      statusText.textContent = "Ошибка инициализации канваса.";
+    }
+    return;
+  }
 
-  let originalImageData = null;   // исходное фото
-  let recoloredImageData = null;  // картинка с окрашенным диском
-  let wheelMask = null;           // маска диска (0 или 255 на пиксель)
-
-  let currentColor = "#d7d7d7";   // алюмохром
+  let canvasSize = 512;
+  let originalImageData = null;
+  let recoloredImageData = null;
+  let wheelMask = null;
+  let currentColor = "#d7d7d7";
   let showingOriginal = false;
 
   function updateStatus(text) {
-    statusText.textContent = text;
+    if (statusText) statusText.textContent = text;
   }
 
   function setIntensityLabel() {
-    intensityValue.textContent = `${intensityInput.value}%`;
+    if (intensityValue) {
+      intensityValue.textContent = `${intensityInput.value}%`;
+    }
+  }
+
+  function initCanvasSize() {
+    const wrapper = document.querySelector(".canvas-wrapper");
+    let size = 600;
+    if (wrapper) {
+      const rect = wrapper.getBoundingClientRect();
+      if (rect.width && rect.width > 0) {
+        size = Math.max(320, Math.min(rect.width, 900));
+      }
+    }
+    previewCanvas.width = size;
+    previewCanvas.height = size;
+    canvasSize = size;
   }
 
   setIntensityLabel();
+  initCanvasSize();
   updateStatus(
     "1) Загрузите фото. 2) Подождите, пока ИИ найдёт диск. 3) Меняйте цвета."
   );
 
-  // --------- ВЫБОР ЦВЕТА (ПРЕСЕТЫ) ---------
+  // При ресайзе: только пока ещё нет загруженного изображения
+  window.addEventListener("resize", () => {
+    if (!originalImageData) {
+      initCanvasSize();
+    }
+  });
 
+  // --------- ВЫБОР ЦВЕТА (ПРЕСЕТЫ) ---------
   if (presetColorsContainer) {
     presetColorsContainer.addEventListener("click", (event) => {
       const btn = event.target.closest(".swatch");
@@ -65,58 +95,50 @@
   }
 
   // --------- ЗАГРУЗКА ИЗОБРАЖЕНИЯ ---------
+  if (fileInput) {
+    fileInput.addEventListener("change", (event) => {
+      const file = event.target.files[0];
+      if (!file) return;
 
-  fileInput.addEventListener("change", (event) => {
-    const file = event.target.files[0];
-    if (!file) return;
-
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      const img = new Image();
-      img.onload = () => {
-        placeholder.classList.add("hidden");
-        showingOriginal = false;
-        if (toggleOriginalBtn) {
-          toggleOriginalBtn.textContent = "Показать исходное";
-        }
-        fitImageToSquare(img);
-        updateStatus("Изображение загружено. ИИ ищет диск...");
-        // Сразу запускаем ИИ
-        runAIWheelDetection();
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const img = new Image();
+        img.onload = () => {
+          if (placeholder) placeholder.classList.add("hidden");
+          showingOriginal = false;
+          if (toggleOriginalBtn) {
+            toggleOriginalBtn.textContent = "Показать исходное";
+          }
+          drawImageToSquareCanvas(img);
+          updateStatus("Изображение загружено. ИИ ищет диск...");
+          runAIWheelDetection();
+        };
+        img.src = e.target.result;
       };
-      img.src = e.target.result;
-    };
-    reader.readAsDataURL(file);
-  });
+      reader.readAsDataURL(file);
+    });
+  }
 
-  // Приводим к формату 1:1 с центрированием (crop)
-  function fitImageToSquare(img) {
-    const wrapper = document.querySelector(".canvas-wrapper");
-    let size = wrapper ? Math.floor(wrapper.clientWidth) : 600;
-    if (!size || size <= 0) {
-      size = 600;
-    }
-
-    previewCanvas.width = size;
-    previewCanvas.height = size;
-    canvasWidth = size;
-    canvasHeight = size;
+  // Обрезка до квадрата и рисование
+  function drawImageToSquareCanvas(img) {
+    initCanvasSize();
 
     const minSide = Math.min(img.width, img.height);
     const sx = (img.width - minSide) / 2;
     const sy = (img.height - minSide) / 2;
 
-    ctx.clearRect(0, 0, size, size);
-    ctx.drawImage(img, sx, sy, minSide, minSide, 0, 0, size, size);
+    ctx.clearRect(0, 0, canvasSize, canvasSize);
+    ctx.drawImage(img, sx, sy, minSide, minSide, 0, 0, canvasSize, canvasSize);
 
-    originalImageData = ctx.getImageData(0, 0, size, size);
+    originalImageData = ctx.getImageData(0, 0, canvasSize, canvasSize);
     recoloredImageData = null;
     wheelMask = null;
   }
 
-  // --------- МАШИННОЕ ОБУЧЕНИЕ: ПОИСК ДИСКА ---------
-
+  // --------- МАШИННОЕ ОБУЧЕНИЕ: ПОИСК ДИСКА (k-means) ---------
   function createWheelMaskAI(imageData, width, height) {
+    if (!imageData || width <= 0 || height <= 0) return null;
+
     const data = imageData.data;
     const totalPixels = width * height;
 
@@ -126,7 +148,6 @@
     const cx = width / 2;
     const cy = height / 2;
 
-    // Подготовим признаки: яркость + расстояние от центра
     let index = 0;
     for (let y = 0; y < height; y++) {
       for (let x = 0; x < width; x++) {
@@ -135,7 +156,7 @@
         const g = data[i4 + 1];
         const b = data[i4 + 2];
 
-        // Перцептивная яркость (0..1)
+        // Яркость 0..1
         const gy = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
         gray[index] = gy;
 
@@ -148,7 +169,6 @@
       }
     }
 
-    // k-means по [яркость, радиус]
     const K = 3;
     const centGray = new Float32Array(K);
     const centRad = new Float32Array(K);
@@ -177,7 +197,7 @@
     const iterations = 4;
 
     for (let it = 0; it < iterations; it++) {
-      // E-шаг: присваиваем пиксели кластерам
+      // E-шаг
       for (let i = 0; i < totalPixels; i++) {
         let bestK = 0;
         let bestDist = Infinity;
@@ -197,7 +217,7 @@
         labels[i] = bestK;
       }
 
-      // M-шаг: пересчитываем центроиды
+      // M-шаг
       sumG.fill(0);
       sumR.fill(0);
       count.fill(0);
@@ -217,10 +237,7 @@
       }
     }
 
-    // Выбираем кластер, который больше всего похож на диск:
-    // средний радиус (не совсем центр и не совсем края),
-    // средняя яркость (не самый тёмный, не самый светлый),
-    // достаточное количество пикселей.
+    // Выбираем кластер "похожий" на диск
     let chosenCluster = 0;
     let bestScore = -Infinity;
 
@@ -229,8 +246,8 @@
       const rMean = centRad[k];
       const cnt = count[k] || 1;
 
-      const grayTarget = 0.6; // диск часто средне-серый
-      const radTarget = 0.5;  // плюс-минус середина радиуса
+      const grayTarget = 0.6;
+      const radTarget = 0.5;
 
       let score = 0;
       score -= Math.abs(gMean - grayTarget) * 2.0;
@@ -252,24 +269,32 @@
   }
 
   function runAIWheelDetection() {
-    if (!originalImageData || !canvasWidth || !canvasHeight) return;
+    if (!originalImageData || !canvasSize) {
+      updateStatus("Сначала загрузите фото.");
+      return;
+    }
 
     updateStatus("ИИ анализирует изображение и ищет диск...");
 
-    // Небольшая задержка, чтобы статус успел обновиться
     setTimeout(() => {
-      wheelMask = createWheelMaskAI(originalImageData, canvasWidth, canvasHeight);
-      if (wheelMask) {
-        updateStatus("Область диска найдена автоматически. Меняйте цвета и интенсивность.");
-        applyColor();
-      } else {
-        updateStatus("Не удалось найти диск. Попробуйте другое фото или пересчитать ИИ.");
+      try {
+        wheelMask = createWheelMaskAI(originalImageData, canvasSize, canvasSize);
+        if (wheelMask) {
+          updateStatus(
+            "Область диска найдена автоматически. Меняйте цвета и интенсивность."
+          );
+          applyColor();
+        } else {
+          updateStatus("Не удалось найти диск. Попробуйте другое фото.");
+        }
+      } catch (err) {
+        console.error(err);
+        updateStatus("Ошибка при работе ИИ. Попробуйте другое фото.");
       }
     }, 10);
   }
 
-  // --------- НАЛОЖЕНИЕ ЦВЕТА ПО МАСКЕ ---------
-
+  // --------- НАЛОЖЕНИЕ ЦВЕТА ---------
   function hexToRgb(hex) {
     let value = hex.replace("#", "");
     if (value.length === 3) {
@@ -287,17 +312,22 @@
   }
 
   function applyColor() {
-    if (!originalImageData || !wheelMask) return;
+    if (!originalImageData || !wheelMask) {
+      if (originalImageData && !showingOriginal) {
+        ctx.putImageData(originalImageData, 0, 0);
+      }
+      return;
+    }
 
     const { r, g, b } = hexToRgb(currentColor || "#d7d7d7");
     const intensity = Number(intensityInput.value) / 100;
 
     const src = originalImageData.data;
-    const totalPixels = canvasWidth * canvasHeight;
+    const totalPixels = canvasSize * canvasSize;
     const dst = new Uint8ClampedArray(src.length);
 
     for (let i = 0; i < totalPixels; i++) {
-      const maskVal = wheelMask[i] / 255; // 0..1
+      const maskVal = wheelMask[i] / 255;
       const alpha = maskVal * intensity;
 
       const idx = i * 4;
@@ -319,7 +349,9 @@
       }
     }
 
-    recoloredImageData = new ImageData(dst, canvasWidth, canvasHeight);
+    const out = ctx.createImageData(canvasSize, canvasSize);
+    out.data.set(dst);
+    recoloredImageData = out;
 
     if (!showingOriginal) {
       ctx.putImageData(recoloredImageData, 0, 0);
@@ -331,8 +363,7 @@
     applyColor();
   });
 
-  // --------- КНОПКИ УПРАВЛЕНИЯ ---------
-
+  // --------- КНОПКИ ---------
   if (rerunAIBtn) {
     rerunAIBtn.addEventListener("click", () => {
       if (!originalImageData) return;
@@ -340,20 +371,22 @@
     });
   }
 
-  resetBtn.addEventListener("click", () => {
-    fileInput.value = "";
-    originalImageData = null;
-    recoloredImageData = null;
-    wheelMask = null;
+  if (resetBtn) {
+    resetBtn.addEventListener("click", () => {
+      if (fileInput) fileInput.value = "";
+      originalImageData = null;
+      recoloredImageData = null;
+      wheelMask = null;
 
-    ctx.clearRect(0, 0, previewCanvas.width, previewCanvas.height);
-    placeholder.classList.remove("hidden");
-    showingOriginal = false;
-    if (toggleOriginalBtn) {
-      toggleOriginalBtn.textContent = "Показать исходное";
-    }
-    updateStatus("Загрузите фото, чтобы начать.");
-  });
+      ctx.clearRect(0, 0, previewCanvas.width, previewCanvas.height);
+      if (placeholder) placeholder.classList.remove("hidden");
+      showingOriginal = false;
+      if (toggleOriginalBtn) {
+        toggleOriginalBtn.textContent = "Показать исходное";
+      }
+      updateStatus("Загрузите фото, чтобы начать.");
+    });
+  }
 
   if (toggleOriginalBtn) {
     toggleOriginalBtn.addEventListener("click", () => {
@@ -371,6 +404,8 @@
         }
         if (recoloredImageData) {
           ctx.putImageData(recoloredImageData, 0, 0);
+        } else {
+          ctx.putImageData(originalImageData, 0, 0);
         }
         toggleOriginalBtn.textContent = "Показать исходное";
         updateStatus("Режим: с окраской (после).");
@@ -381,3 +416,15 @@
   if (downloadBtn) {
     downloadBtn.addEventListener("click", () => {
       if (!originalImageData) return;
+
+      const link = document.createElement("a");
+      link.href = previewCanvas.toDataURL("image/png");
+      link.download = "wheel-color.png";
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+
+      updateStatus("Результат сохранён как PNG-файл.");
+    });
+  }
+});
