@@ -18,10 +18,12 @@
       <section class="preview">
         <div class="canvas-wrapper">
           <div id="placeholder" class="placeholder">
-            <p>Загрузите фото автомобиля, затем нарисуйте маску по диску, чтобы перекрасить его.</p>
+            <p>
+              Загрузите фото автомобиля. Изображение будет приведено к формату 1:1,
+              а встроенный ИИ автоматически найдёт область диска.
+            </p>
           </div>
-          <canvas id="renderCanvas"></canvas>
-          <canvas id="maskCanvas"></canvas>
+          <canvas id="previewCanvas"></canvas>
         </div>
         <div class="status-bar">
           <span id="statusText"></span>
@@ -36,7 +38,10 @@
           <div class="control-group">
             <label for="fileInput">1. Загрузите фото</label>
             <input type="file" id="fileInput" accept="image/*" />
-            <small>Лучше всего — фото сбоку, где диск хорошо виден.</small>
+            <small>
+              Лучше всего — фото сбоку, где диск крупно и примерно по центру.
+              Картинка автоматически обрежется до 1:1.
+            </small>
           </div>
 
           <div class="control-group">
@@ -50,3 +55,96 @@
                 Алюмохром
               </button>
               <button class="swatch"
+                      type="button"
+                      data-color="#4a4c52"
+                      data-name="Графит тёмный"
+                      style="--swatch-color:#4a4c52;">
+                Графит тёмный
+              </button>
+              <button class="swatch"
+                      type="button"
+                      data-color="#6b7078"
+                      data-name="Графит светлый"
+                      style="--swatch-color:#6b7078;">
+                Графит светлый
+              </button>
+              <button class="swatch"
+                      type="button"
+                      data-color="#1b1b1d"
+                      data-name="Чёрный глянец"
+                      style="--swatch-color:#1b1b1d;">
+                Чёрный глянец
+              </button>
+              <button class="swatch"
+                      type="button"
+                      data-color="#b6b9c3"
+                      data-name="Платина сатин"
+                      style="--swatch-color:#b6b9c3;">
+                Платина сатин
+              </button>
+              <button class="swatch"
+                      type="button"
+                      data-color="#a48f7a"
+                      data-name="Бронза"
+                      style="--swatch-color:#a48f7a;">
+                Бронза
+              </button>
+            </div>
+            <small id="currentColorLabel">Текущий цвет: Алюмохром</small>
+          </div>
+
+          <div class="control-group">
+            <label for="intensity">
+              3. Интенсивность окраски:
+              <span id="intensityValue">90%</span>
+            </label>
+            <input
+              type="range"
+              id="intensity"
+              min="30"
+              max="100"
+              value="90"
+            />
+          </div>
+
+          <div class="buttons">
+            <button id="rerunAI" type="button" class="secondary">
+              Пересчитать область диска (ИИ)
+            </button>
+            <button id="toggleOriginal" type="button" class="secondary">
+              Показать исходное
+            </button>
+          </div>
+
+          <div class="buttons">
+            <button id="downloadResult" type="button">
+              Скачать результат
+            </button>
+            <button id="resetAll" type="button" class="secondary">
+              Сбросить всё
+            </button>
+          </div>
+
+          <div class="hint">
+            <p><strong>Как работать:</strong></p>
+            <ol>
+              <li>Загрузите фото автомобиля — оно станет квадратным 1:1.</li>
+              <li>Встроенный ИИ проанализирует изображение и попытается найти диск.</li>
+              <li>Выберите нужный оттенок (алюмохром, графит, бронза и т.д.).</li>
+              <li>При изменении цвета/интенсивности диск автоматически перекрашивается.</li>
+              <li>Кнопка «Пересчитать область диска (ИИ)» ещё раз запустит анализ.</li>
+              <li>«Показать исходное» — режим «до», «Скачать результат» — PNG для клиента.</li>
+            </ol>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="app-footer">
+      <span>Онлайн-приложение с элементами машинного обучения для подбора цвета дисков по фото.</span>
+    </footer>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
