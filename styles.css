@@ -54,7 +54,7 @@ body {
   overflow: hidden;
   border: 1px solid rgba(255, 255, 255, 0.08);
   box-shadow: 0 24px 60px rgba(0, 0, 0, 0.9);
-  /* теперь строго квадрат 1:1 */
+  /* строго квадрат 1:1 */
   aspect-ratio: 1 / 1;
 }
 
